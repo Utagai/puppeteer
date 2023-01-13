@@ -14,11 +14,6 @@ use std::process::{Child, Command, Stdio};
 #[macro_use]
 extern crate rocket;
 
-#[get("/")]
-fn index() -> &'static str {
-    "Hello, world!"
-}
-
 #[derive(Serialize, Deserialize, Copy, Clone)]
 #[serde(crate = "rocket::serde")]
 struct CaptureOptions {
@@ -153,7 +148,6 @@ impl PuppetMap {
 fn rocket() -> _ {
     rocket::build()
         .manage(Mutex::new(PuppetMap::new()))
-        .mount("/", routes![index])
         .mount("/", routes![cmd])
 }
 
