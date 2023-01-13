@@ -1,3 +1,5 @@
+use rocket::http::Status;
+use rocket::response::status;
 use rocket::response::Responder;
 use rocket::serde::json::Json;
 use rocket::serde::{Deserialize, Serialize};
@@ -95,7 +97,7 @@ const NO_ID: i32 = -1;
 async fn cmd(
     pup_req: Json<CreatePuppetReq<'_>>,
     pups: &'_ State<Mutex<PuppetMap>>,
-) -> Json<CreatePuppetResp> {
+) -> status::Custom<Json<CreatePuppetResp>> {
     let (stdout_cfg, stderr_cfg) = pup_req.capture.unwrap_or(CaptureOptions::default()).stdio();
     let proc_res = Command::new(pup_req.exec)
         .args(&pup_req.args)
@@ -106,9 +108,12 @@ async fn cmd(
         Ok(proc) => {
             let mut pups = pups.lock().await;
             let cmd_id = pups.push(proc);
-            Json(CreatePuppetResp::id(cmd_id))
+            status::Custom(Status::Accepted, Json(CreatePuppetResp::id(cmd_id)))
         }
-        Err(err) => Json(CreatePuppetResp::err(&format!("{:?}", err))),
+        Err(err) => status::Custom(
+            Status::BadRequest,
+            Json(CreatePuppetResp::err(&format!("{:?}", err))),
+        ),
     }
 }
 
