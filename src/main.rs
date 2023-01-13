@@ -29,7 +29,7 @@ impl Default for CaptureOptions {
 
 #[derive(Deserialize)]
 #[serde(crate = "rocket::serde")]
-struct PuppetRequest<'r> {
+struct CreatePuppetReq<'r> {
     exec: &'r str,
     args: Vec<&'r str>,
     capture: Option<CaptureOptions>,
@@ -38,18 +38,19 @@ struct PuppetRequest<'r> {
 // TODO: Can we remove the serde()?
 #[derive(Serialize)]
 #[serde(crate = "rocket::serde")]
-struct CmdResponse {
+struct CreatePuppetResp {
     id: i32,
 }
 
 #[put("/cmd", format = "json", data = "<command>")]
 async fn cmd(
-    command: Json<PuppetRequest<'_>>,
+    command: Json<CreatePuppetReq<'_>>,
     queue: &'_ State<Mutex<PuppetQueue>>,
-) -> Json<CmdResponse> {
+) -> Json<CreatePuppetResp> {
     let mut queue = queue.lock().await;
     let cmd_id = queue.push(Puppet::from(&command));
-    return Json(CmdResponse { id: cmd_id });
+    return Json(CreatePuppetResp { id: cmd_id });
+}
 }
 
 struct Puppet {
@@ -59,8 +60,8 @@ struct Puppet {
     capture: CaptureOptions,
 }
 
-impl From<&Json<PuppetRequest<'_>>> for Puppet {
-    fn from(req: &Json<PuppetRequest>) -> Self {
+impl From<&Json<CreatePuppetReq<'_>>> for Puppet {
+    fn from(req: &Json<CreatePuppetReq>) -> Self {
         Puppet {
             id: 0,
             exec: req.exec.to_owned(),
