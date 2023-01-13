@@ -63,6 +63,20 @@ struct CreatePuppetReq<'r> {
 #[serde(crate = "rocket::serde")]
 struct CreatePuppetResp {
     id: i32,
+    err: Option<String>,
+}
+
+impl CreatePuppetResp {
+    fn id(id: i32) -> CreatePuppetResp {
+        CreatePuppetResp { id, err: None }
+    }
+
+    fn err(errmsg: &str) -> CreatePuppetResp {
+        CreatePuppetResp {
+            id: NO_ID,
+            err: Some(errmsg.to_owned()),
+        }
+    }
 }
 
 #[derive(Error, Debug, Responder)]
@@ -75,20 +89,27 @@ pub enum PuppetError {
     Unknown { source: std::io::Error },
 }
 
+const NO_ID: i32 = -1;
+
 #[put("/cmd", format = "json", data = "<pup_req>")]
 async fn cmd(
     pup_req: Json<CreatePuppetReq<'_>>,
     pups: &'_ State<Mutex<PuppetMap>>,
-) -> Result<Json<CreatePuppetResp>, PuppetError> {
+) -> Json<CreatePuppetResp> {
     let (stdout_cfg, stderr_cfg) = pup_req.capture.unwrap_or(CaptureOptions::default()).stdio();
-    let proc = Command::new(pup_req.exec)
+    let proc_res = Command::new(pup_req.exec)
         .args(&pup_req.args)
         .stdout(stdout_cfg)
         .stderr(stderr_cfg)
-        .spawn()?;
-    let mut pups = pups.lock().await;
-    let cmd_id = pups.push(proc);
-    Ok(Json(CreatePuppetResp { id: cmd_id }))
+        .spawn();
+    match proc_res {
+        Ok(proc) => {
+            let mut pups = pups.lock().await;
+            let cmd_id = pups.push(proc);
+            Json(CreatePuppetResp::id(cmd_id))
+        }
+        Err(err) => Json(CreatePuppetResp::err(&format!("{:?}", err))),
+    }
 }
 
 struct Puppet {
