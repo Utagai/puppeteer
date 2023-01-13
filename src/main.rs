@@ -7,6 +7,7 @@ use rocket::State;
 
 use thiserror::Error;
 
+use std::collections::HashMap;
 use std::process::{Child, Command, Stdio};
 
 #[macro_use]
@@ -78,7 +79,7 @@ pub enum PuppetError {
 #[put("/cmd", format = "json", data = "<pup_req>")]
 async fn cmd(
     pup_req: Json<CreatePuppetReq<'_>>,
-    queue: &'_ State<Mutex<PuppetQueue>>,
+    pups: &'_ State<Mutex<PuppetMap>>,
 ) -> Result<Json<CreatePuppetResp>, PuppetError> {
     let (stdout_cfg, stderr_cfg) = pup_req.capture.unwrap_or(CaptureOptions::default()).stdio();
     let proc = Command::new(pup_req.exec)
@@ -86,8 +87,8 @@ async fn cmd(
         .stdout(stdout_cfg)
         .stderr(stderr_cfg)
         .spawn()?;
-    let mut queue = queue.lock().await;
-    let cmd_id = queue.push(proc);
+    let mut pups = pups.lock().await;
+    let cmd_id = pups.push(proc);
     Ok(Json(CreatePuppetResp { id: cmd_id }))
 }
 
@@ -96,22 +97,28 @@ struct Puppet {
     proc: Child,
 }
 
-struct PuppetQueue {
+struct PuppetMap {
     cur_id: i32,
-    pups: Vec<Puppet>,
+    pups: HashMap<i32, Puppet>,
 }
 
-impl PuppetQueue {
+impl PuppetMap {
     fn new() -> Self {
-        PuppetQueue {
+        PuppetMap {
             cur_id: 0,
-            pups: Vec::new(),
+            pups: HashMap::new(),
         }
     }
 
     fn push(&mut self, cmd: Child) -> i32 {
         let next_id = self.cur_id;
-        self.pups.push(Puppet { id: next_id, proc: cmd });
+        self.pups.insert(
+            next_id,
+            Puppet {
+                id: next_id,
+                proc: cmd,
+            },
+        );
         self.cur_id += 1;
         return next_id;
     }
@@ -120,7 +127,7 @@ impl PuppetQueue {
 #[launch]
 fn rocket() -> _ {
     rocket::build()
-        .manage(Mutex::new(PuppetQueue::new()))
+        .manage(Mutex::new(PuppetMap::new()))
         .mount("/", routes![index])
         .mount("/", routes![cmd])
 }
