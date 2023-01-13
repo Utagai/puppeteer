@@ -1,8 +1,7 @@
-use rocket::response::{self, Responder};
+use rocket::response::Responder;
 use rocket::serde::json::Json;
 use rocket::serde::{Deserialize, Serialize};
 use rocket::tokio::sync::Mutex;
-use rocket::Request;
 use rocket::State;
 
 use thiserror::Error;
@@ -28,12 +27,12 @@ struct CaptureOptions {
 impl CaptureOptions {
     fn stdio(&self) -> (Stdio, Stdio) {
         (
-            CaptureOptions::flagToStdio(self.stdout),
-            CaptureOptions::flagToStdio(self.stderr),
+            CaptureOptions::flag_to_stdio(self.stdout),
+            CaptureOptions::flag_to_stdio(self.stderr),
         )
     }
 
-    fn flagToStdio(flag: bool) -> Stdio {
+    fn flag_to_stdio(flag: bool) -> Stdio {
         if flag {
             Stdio::piped()
         } else {
