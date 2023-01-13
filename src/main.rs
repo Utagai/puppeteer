@@ -1,7 +1,13 @@
+use rocket::response::{self, Responder};
 use rocket::serde::json::Json;
 use rocket::serde::{Deserialize, Serialize};
 use rocket::tokio::sync::Mutex;
+use rocket::Request;
 use rocket::State;
+
+use thiserror::Error;
+
+use std::process::{Child, Command, Stdio};
 
 #[macro_use]
 extern crate rocket;
@@ -11,11 +17,28 @@ fn index() -> &'static str {
     "Hello, world!"
 }
 
-#[derive(Deserialize, Clone)]
+#[derive(Deserialize, Copy, Clone)]
 #[serde(crate = "rocket::serde")]
 struct CaptureOptions {
     stdout: bool,
     stderr: bool,
+}
+
+impl CaptureOptions {
+    fn stdio(&self) -> (Stdio, Stdio) {
+        (
+            CaptureOptions::flagToStdio(self.stdout),
+            CaptureOptions::flagToStdio(self.stderr),
+        )
+    }
+
+    fn flagToStdio(flag: bool) -> Stdio {
+        if flag {
+            Stdio::piped()
+        } else {
+            Stdio::inherit()
+        }
+    }
 }
 
 impl Default for CaptureOptions {
@@ -42,40 +65,35 @@ struct CreatePuppetResp {
     id: i32,
 }
 
-#[put("/cmd", format = "json", data = "<command>")]
-async fn cmd(
-    command: Json<CreatePuppetReq<'_>>,
-    queue: &'_ State<Mutex<PuppetQueue>>,
-) -> Json<CreatePuppetResp> {
-    let mut queue = queue.lock().await;
-    let cmd_id = queue.push(Puppet::from(&command));
-    return Json(CreatePuppetResp { id: cmd_id });
+#[derive(Error, Debug, Responder)]
+pub enum PuppetError {
+    #[error("filler error")]
+    Foo(String),
+    #[error("io error")]
+    IOError(#[from] std::io::Error),
+    #[error("unknown error")]
+    Unknown { source: std::io::Error },
 }
+
+#[put("/cmd", format = "json", data = "<pup_req>")]
+async fn cmd(
+    pup_req: Json<CreatePuppetReq<'_>>,
+    queue: &'_ State<Mutex<PuppetQueue>>,
+) -> Result<Json<CreatePuppetResp>, PuppetError> {
+    let (stdout_cfg, stderr_cfg) = pup_req.capture.unwrap_or(CaptureOptions::default()).stdio();
+    let proc = Command::new(pup_req.exec)
+        .args(&pup_req.args)
+        .stdout(stdout_cfg)
+        .stderr(stderr_cfg)
+        .spawn()?;
+    let mut queue = queue.lock().await;
+    let cmd_id = queue.push(proc);
+    Ok(Json(CreatePuppetResp { id: cmd_id }))
 }
 
 struct Puppet {
     id: i32,
-    exec: String,
-    args: Vec<String>,
-    capture: CaptureOptions,
-}
-
-impl From<&Json<CreatePuppetReq<'_>>> for Puppet {
-    fn from(req: &Json<CreatePuppetReq>) -> Self {
-        Puppet {
-            id: 0,
-            exec: req.exec.to_owned(),
-            args: (&req.args)
-                .into_iter()
-                .map(|v| v.to_owned().to_owned())
-                .collect(),
-            capture: req
-                .capture
-                .clone()
-                .or(Some(CaptureOptions::default()))
-                .unwrap(),
-        }
-    }
+    proc: Child,
 }
 
 struct PuppetQueue {
@@ -91,9 +109,9 @@ impl PuppetQueue {
         }
     }
 
-    fn push(&mut self, pup: Puppet) -> i32 {
+    fn push(&mut self, cmd: Child) -> i32 {
         let next_id = self.cur_id;
-        self.pups.push(pup);
+        self.pups.push(Puppet { id: next_id, proc: cmd });
         self.cur_id += 1;
         return next_id;
     }
