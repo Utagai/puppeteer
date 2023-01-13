@@ -19,7 +19,7 @@ fn index() -> &'static str {
     "Hello, world!"
 }
 
-#[derive(Deserialize, Copy, Clone)]
+#[derive(Serialize, Deserialize, Copy, Clone)]
 #[serde(crate = "rocket::serde")]
 struct CaptureOptions {
     stdout: bool,
@@ -52,7 +52,7 @@ impl Default for CaptureOptions {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(crate = "rocket::serde")]
 struct CreatePuppetReq<'r> {
     exec: &'r str,
@@ -61,7 +61,7 @@ struct CreatePuppetReq<'r> {
 }
 
 // TODO: Can we remove the serde()?
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(crate = "rocket::serde")]
 struct CreatePuppetResp {
     id: i32,
@@ -155,4 +155,37 @@ fn rocket() -> _ {
         .manage(Mutex::new(PuppetMap::new()))
         .mount("/", routes![index])
         .mount("/", routes![cmd])
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{CreatePuppetReq, CreatePuppetResp};
+
+    use super::rocket;
+    use rocket::local::blocking::Client;
+
+    fn get_rocket_client() -> Client {
+        Client::tracked(rocket()).unwrap()
+    }
+
+    mod subtests {
+        use super::*;
+
+        #[test]
+        fn test_run_cmd_successfully() {
+            let client = get_rocket_client();
+            let resp = client
+                .put("/cmd")
+                .json(&CreatePuppetReq {
+                    exec: "echo",
+                    args: vec!["foo"],
+                    capture: None,
+                })
+                .dispatch()
+                .into_json::<CreatePuppetResp>()
+                .expect("expected non-None response for creating command");
+            assert_eq!(resp.err, None);
+            assert_eq!(resp.id, 0);
+        }
+    }
 }
