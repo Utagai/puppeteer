@@ -1,9 +1,11 @@
-use rocket::http::Status;
-use rocket::response::status;
-use rocket::serde::json::Json;
+use rocket::http::ContentType;
+use rocket::response;
+use rocket::response::{Responder, Response};
+use rocket::serde::json::{self, Json};
 use rocket::serde::{Deserialize, Serialize};
 use rocket::tokio::sync::Mutex;
 use rocket::State;
+use std::io::Cursor;
 
 use std::collections::HashMap;
 use std::process::ExitStatus;
@@ -58,18 +60,42 @@ struct CreateReq<'r> {
 #[serde(crate = "rocket::serde")]
 struct CreateResp {
     id: i32,
-    err: Option<String>,
 }
 
 impl CreateResp {
     fn id(id: i32) -> CreateResp {
-        CreateResp { id, err: None }
+        CreateResp { id }
     }
+}
 
-    fn err(errmsg: &str) -> CreateResp {
-        CreateResp {
-            id: NO_ID,
-            err: Some(errmsg.to_owned()),
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("filler error")]
+    Foo(String),
+    #[error("filler error")]
+    PuppetNotFound(i32),
+    #[error("io error")]
+    IOError(#[from] std::io::Error),
+    #[error("unknown error")]
+    Unknown { source: std::io::Error },
+}
+
+#[derive(Serialize, Deserialize)]
+struct ErrorJSONResp {
+    err: String,
+}
+
+impl<'r> Responder<'r, 'r> for Error {
+    fn respond_to(self, request: &'r rocket::Request<'_>) -> rocket::response::Result<'r> {
+        let err_resp = ErrorJSONResp {
+            err: format!("{:?}", self),
+        };
+        match json::to_string(&err_resp) {
+            Ok(err_json) => Response::build()
+                .header(ContentType::JSON)
+                .sized_body(err_json.len(), Cursor::new(err_json))
+                .ok(),
+            Err(err) => response::Debug(err).respond_to(request),
         }
     }
 }
@@ -80,24 +106,16 @@ const NO_ID: i32 = -1;
 async fn cmd(
     pup_req: Json<CreateReq<'_>>,
     pups: &'_ State<Mutex<PuppetMap>>,
-) -> status::Custom<Json<CreateResp>> {
+) -> Result<Json<CreateResp>, Error> {
     let (stdout_cfg, stderr_cfg) = pup_req.capture.unwrap_or(CaptureOptions::default()).stdio();
-    let proc_res = Command::new(pup_req.exec)
+    let proc = Command::new(pup_req.exec)
         .args(&pup_req.args)
         .stdout(stdout_cfg)
         .stderr(stderr_cfg)
-        .spawn();
-    match proc_res {
-        Ok(proc) => {
-            let mut pups = pups.lock().await;
-            let cmd_id = pups.push(proc);
-            status::Custom(Status::Accepted, Json(CreateResp::id(cmd_id)))
-        }
-        Err(err) => status::Custom(
-            Status::BadRequest,
-            Json(CreateResp::err(&format!("{:?}", err))),
-        ),
-    }
+        .spawn()?;
+    let mut pups = pups.lock().await;
+    let cmd_id = pups.push(proc);
+    Ok(Json(CreateResp::id(cmd_id)))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -111,45 +129,20 @@ struct WaitResp {
 }
 
 #[post("/wait/<id>")]
-async fn wait(id: i32, pups: &'_ State<Mutex<PuppetMap>>) -> status::Custom<Json<WaitResp>> {
+async fn wait(id: i32, pups: &'_ State<Mutex<PuppetMap>>) -> Result<Json<WaitResp>, Error> {
     let mut pups = pups.lock().await;
     if let Some(pup) = pups.get(id) {
-        match pup.wait() {
-            Ok(exit_status) => status::Custom(
-                Status::Ok,
-                Json(WaitResp {
-                    id: pup.id,
-                    exit_code: exit_status.code().unwrap(),
-                    signal_code: NO_ID,
-                    signaled: false,
-                    success: exit_status.success(),
-                    err: None,
-                }),
-            ),
-            Err(err) => status::Custom(
-                Status::BadRequest,
-                Json(WaitResp {
-                    id: NO_ID,
-                    exit_code: NO_ID,
-                    signal_code: NO_ID,
-                    signaled: false,
-                    success: false,
-                    err: Some(format!("{:?}", err)),
-                }),
-            ),
-        }
+        let exit_status = pup.wait()?;
+        Ok(Json(WaitResp {
+            id: pup.id,
+            exit_code: exit_status.code().unwrap(),
+            signal_code: NO_ID,
+            signaled: false,
+            success: exit_status.success(),
+            err: None,
+        }))
     } else {
-        status::Custom(
-            Status::NotFound,
-            Json(WaitResp {
-                id: NO_ID,
-                exit_code: NO_ID,
-                signal_code: NO_ID,
-                signaled: false,
-                success: false,
-                err: Some(String::from("id not found")),
-            }),
-        )
+        Err(Error::PuppetNotFound(id))
     }
 }
 
@@ -232,7 +225,6 @@ mod tests {
                 .dispatch()
                 .into_json::<CreateResp>()
                 .expect("expected non-None response for creating command");
-            assert_eq!(create_resp.err, None);
             assert_eq!(create_resp.id, 0);
             let wait_resp = client
                 .post(format!("/wait/{}", create_resp.id))
