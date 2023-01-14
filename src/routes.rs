@@ -1,3 +1,6 @@
+use std::os::unix::process::ExitStatusExt;
+use std::process::ExitStatus;
+
 use rocket::http::Status;
 use rocket::serde::json::Json;
 use rocket::serde::{Deserialize, Serialize};
@@ -96,30 +99,38 @@ pub async fn cmd(
 #[derive(Serialize, Deserialize)]
 pub struct WaitResp {
     id: i32,
-    exit_code: i32,
-    signal_code: i32,
-    signaled: bool,
+    pub exit_code: i32,
+    pub signal_code: i32,
+    pub signaled: bool,
     pub success: bool,
-    err: Option<String>,
 }
 
-// TODO: Do something about this wack shit.
-const NO_ID: i32 = -1;
+impl WaitResp {
+    const NOVAL: i32 = -1;
+
+    fn from(id: i32, status: ExitStatus) -> Self {
+        let resp = WaitResp {
+            id,
+            exit_code: status.code().unwrap_or(Self::NOVAL),
+            signal_code: status.code().unwrap_or(
+                status
+                    .signal()
+                    .unwrap_or(status.stopped_signal().unwrap_or(Self::NOVAL)),
+            ),
+            signaled: status.code().is_none(),
+            success: status.success(),
+        };
+
+        resp
+    }
+}
 
 #[post("/wait/<id>")]
 pub async fn wait(id: i32, pups: &'_ State<Mutex<PuppetManager>>) -> Result<Json<WaitResp>, Error> {
     let mut pups = pups.lock().await;
     if let Some(pup) = pups.get(id) {
         let exit_status = pup.wait()?;
-        Ok(Json(WaitResp {
-            id: pup.id,
-            exit_code: exit_status.code().unwrap(),
-            // TODO: Handle signals.
-            signal_code: NO_ID,
-            signaled: false,
-            success: exit_status.success(),
-            err: None,
-        }))
+        Ok(Json(WaitResp::from(pup.id, exit_status)))
     } else {
         Err(Error::PuppetNotFound(id))
     }

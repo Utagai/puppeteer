@@ -125,8 +125,18 @@ mod tests {
         assert_eq!(create_resp.stderr, Stdio::INHERITED);
         assert_ne!(create_resp.pid, 0);
         let wait_resp = wait_for_id(&client, create_resp.id);
-        // TODO: There are more fields here that we haven't tested.
         assert!(wait_resp.success);
+    }
+
+    #[test]
+    fn check_wait_resp_fields() {
+        let client = get_rocket_client();
+        let create_resp = create_req(&client, "echo", vec!["-n", ""], CaptureOptions::none());
+        let wait_resp = wait_for_id(&client, create_resp.id);
+        assert!(wait_resp.success);
+        assert_eq!(wait_resp.exit_code, 0);
+        assert!(!wait_resp.signaled);
+        assert_eq!(!wait_resp.signal_code, -1);
     }
 
     // TODO: Need to test error cases:
