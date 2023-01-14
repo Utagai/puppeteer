@@ -31,9 +31,9 @@ mod tests {
     use std::path::{Path, PathBuf};
     use uuid::Uuid;
 
-    fn get_rocket_client() -> Client {
     const INHERITED: &str = "inherited";
 
+    fn make_rocket_client() -> Client {
         Client::tracked(rocket()).unwrap()
     }
 
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn run_cmd_successfully() {
-        let client = get_rocket_client();
+        let client = make_rocket_client();
         let create_resp = create_req(&client, "echo", vec!["-n", ""], CaptureOptions::none());
         assert_eq!(create_resp.id, 0);
         assert_eq!(create_resp.stdout, INHERITED);
@@ -129,7 +129,7 @@ mod tests {
 
     #[test]
     fn check_wait_resp_fields() {
-        let client = get_rocket_client();
+        let client = make_rocket_client();
         let create_resp = create_req(&client, "echo", vec!["-n", ""], CaptureOptions::none());
         let wait_resp = wait_for_id(&client, create_resp.id);
         assert!(wait_resp.success);
@@ -157,7 +157,7 @@ mod tests {
 
     #[test]
     fn kill_cmd() {
-        let client = get_rocket_client();
+        let client = make_rocket_client();
         let forever = get_testscript_path("forever.sh");
         let create_resp = create_req(
             &client,
@@ -175,7 +175,7 @@ mod tests {
 
     #[test]
     fn cmd_inherits_from_server_env() {
-        let client = get_rocket_client();
+        let client = make_rocket_client();
         let expected_env_var_key = format!("puppet-{}", Uuid::new_v4());
         let expected_env_var_val = "blah";
         std::env::set_var(&expected_env_var_key, expected_env_var_val);
@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn can_stream_cmd_output_without_wait() {
-        let client = get_rocket_client();
+        let client = make_rocket_client();
 
         let periodic_print = get_testscript_path("periodic.sh");
         let create_resp = create_req(
@@ -251,7 +251,7 @@ mod tests {
 
         #[test]
         fn stdout() {
-            let client = get_rocket_client();
+            let client = make_rocket_client();
             let expected_output = "bar";
             assert_eq!(
                 run_cmd_and_get_output(
@@ -267,7 +267,7 @@ mod tests {
 
         #[test]
         fn stderr() {
-            let client = get_rocket_client();
+            let client = make_rocket_client();
             let expected_output = "bar";
             let stderr_print = get_testscript_path("stderr.sh");
             assert_eq!(
@@ -286,7 +286,7 @@ mod tests {
 
         #[test]
         fn both() {
-            let client = get_rocket_client();
+            let client = make_rocket_client();
             // TODO: we should maybe emit two different values for stdout v stderr -- this tests we aren't mixing the two up.
             let expected_output = "bar";
             let both_std_print = get_testscript_path("both_std.sh");
