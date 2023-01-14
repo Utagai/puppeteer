@@ -138,14 +138,6 @@ mod tests {
         assert_eq!(!wait_resp.signal_code, -1);
     }
 
-    // TODO: Need to test error cases:
-    // * Puppet that DNE.
-    // * double-wait
-    // * double-kill
-    // * wait after kill
-    // * exec that DNE
-    // * exec that isn't an exec?
-
     fn find_proc(pid: u32) -> Option<psutil::process::Process> {
         psutil::process::processes()
             .expect("failed to get a listing of system processes")
@@ -300,6 +292,33 @@ mod tests {
             );
             assert_eq!(output.stdout, format!("{}\n", expected_output));
             assert_eq!(output.stderr, format!("{}\n", expected_output));
+        }
+    }
+
+    // TODO: Need to test error cases:
+    // * double-wait
+    // * double-kill
+    // * wait after kill
+    // * exec that DNE
+    // * exec that isn't an exec?
+
+    mod errors {
+        use serde::{Deserialize, Serialize};
+
+        use super::*;
+
+        #[derive(Serialize, Deserialize)]
+        struct ErrorJSONResp {
+            err: String,
+        }
+
+        #[test]
+        fn puppet_dne() {
+            let client = make_rocket_client();
+            let fake_id = 243423423;
+            let resp = client.post(format!("/wait/{}", fake_id)).dispatch();
+            let err_json = resp.into_json::<ErrorJSONResp>().unwrap();
+            assert_eq!(err_json.err, format!("PuppetNotFound({})", fake_id));
         }
     }
 }
