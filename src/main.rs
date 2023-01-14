@@ -18,7 +18,6 @@ use std::process::{Child, Command, Stdio};
 extern crate rocket;
 
 #[derive(Serialize, Deserialize, Copy, Clone)]
-#[serde(crate = "rocket::serde")]
 struct CaptureOptions {
     stdout: bool,
     stderr: bool,
@@ -64,16 +63,13 @@ impl Default for CaptureOptions {
 }
 
 #[derive(Serialize, Deserialize)]
-#[serde(crate = "rocket::serde")]
 struct CreateReq<'r> {
     exec: &'r str,
     args: Vec<&'r str>,
     capture: Option<CaptureOptions>,
 }
 
-// TODO: Can we remove the serde()?
 #[derive(Serialize, Deserialize)]
-#[serde(crate = "rocket::serde")]
 struct CreateResp {
     id: i32,
     stdout: String,
