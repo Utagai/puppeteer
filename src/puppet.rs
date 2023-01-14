@@ -32,7 +32,7 @@ impl Puppet {
     }
 }
 
-pub struct Stdio {
+struct Stdio {
     stdio: process::Stdio,
     label: String,
 }

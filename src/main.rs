@@ -23,10 +23,7 @@ fn rocket() -> _ {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        puppet::Stdio,
-        routes::{CaptureOptions, CreateReq, CreateResp, WaitResp},
-    };
+    use crate::routes::{CaptureOptions, CreateReq, CreateResp, WaitResp};
 
     use super::rocket;
     use core::time;
@@ -35,6 +32,8 @@ mod tests {
     use uuid::Uuid;
 
     fn get_rocket_client() -> Client {
+    const INHERITED: &str = "inherited";
+
         Client::tracked(rocket()).unwrap()
     }
 
@@ -78,14 +77,14 @@ mod tests {
             assert!(create_resp.stdout != "");
             output.stdout = get_contents(&create_resp.stdout);
         } else {
-            assert_eq!(create_resp.stdout, Stdio::INHERITED);
+            assert_eq!(create_resp.stdout, INHERITED);
         }
 
         if capture_opts.stderr {
             assert!(create_resp.stderr != "");
             output.stderr = get_contents(&create_resp.stderr);
         } else {
-            assert_eq!(create_resp.stderr, Stdio::INHERITED);
+            assert_eq!(create_resp.stderr, INHERITED);
         }
 
         output
@@ -121,8 +120,8 @@ mod tests {
         let client = get_rocket_client();
         let create_resp = create_req(&client, "echo", vec!["-n", ""], CaptureOptions::none());
         assert_eq!(create_resp.id, 0);
-        assert_eq!(create_resp.stdout, Stdio::INHERITED);
-        assert_eq!(create_resp.stderr, Stdio::INHERITED);
+        assert_eq!(create_resp.stdout, INHERITED);
+        assert_eq!(create_resp.stderr, INHERITED);
         assert_ne!(create_resp.pid, 0);
         let wait_resp = wait_for_id(&client, create_resp.id);
         assert!(wait_resp.success);
@@ -203,7 +202,7 @@ mod tests {
         );
         assert_eq!(create_resp.id, 0);
         assert!(create_resp.stdout != "");
-        assert_eq!(create_resp.stderr, Stdio::INHERITED);
+        assert_eq!(create_resp.stderr, INHERITED);
 
         let get_last_num = || loop {
             let contents = get_contents(&create_resp.stdout);
