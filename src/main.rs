@@ -394,6 +394,33 @@ mod tests {
             ));
             assert_eq!(contents, format!("{}\n", expected_output));
         }
+
+        #[test]
+        fn both() {
+            let client = get_rocket_client();
+            let expected_output = "bar";
+            let stderr_print = get_testscript_path("both_std.sh");
+            let create_resp = create_req(
+                &client,
+                stderr_print.to_str().unwrap(),
+                vec![expected_output],
+                CaptureOptions::all(),
+            );
+            assert!(create_resp.stdout != "");
+            assert!(create_resp.stderr != "");
+            let wait_resp = wait_for_id(&client, create_resp.id);
+            assert!(wait_resp.success);
+            let contents = std::fs::read_to_string(&create_resp.stdout).expect(&format!(
+                "failed to open stdout file @ {}",
+                &create_resp.stdout
+            ));
+            assert_eq!(contents, format!("{}\n", expected_output));
+            let contents = std::fs::read_to_string(&create_resp.stderr).expect(&format!(
+                "failed to open stderr file @ {}",
+                &create_resp.stderr
+            ));
+            assert_eq!(contents, format!("{}\n", expected_output));
+        }
     }
 
     // TODO: This has to be done once we've tested and confirmed that
