@@ -299,6 +299,7 @@ mod tests {
     use super::rocket;
     use rocket::local::{blocking::Client, blocking::LocalRequest};
     use serde::{Deserialize, Serialize};
+    use uuid::Uuid;
 
     fn get_rocket_client() -> Client {
         Client::tracked(rocket()).unwrap()
@@ -379,6 +380,21 @@ mod tests {
         assert_eq!(create_resp.stderr, OutStdio::INHERITED);
         let wait_resp = wait_for_id(&client, create_resp.id);
         assert!(wait_resp.success);
+    }
+
+    #[test]
+    fn cmd_inherits_from_server_env() {
+        let client = get_rocket_client();
+        let expected_env_var_key = format!("puppet-{}", Uuid::new_v4());
+        let expected_env_var_val = "blah";
+        std::env::set_var(&expected_env_var_key, expected_env_var_val);
+        let output =
+            run_cmd_and_get_output(&client, "env", vec![], CaptureOptions::stdout()).stdout;
+        println!("output from env: {}", output);
+        output.contains(&format!(
+            "{}={}",
+            expected_env_var_key, expected_env_var_val
+        ));
     }
 
     mod captures {
