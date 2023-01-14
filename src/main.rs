@@ -352,6 +352,12 @@ mod tests {
             return current_dir.join("testscripts").join(name);
         }
 
+        fn check_contents(filepath: String, expected_output: &'static str) {
+            let contents = std::fs::read_to_string(&filepath)
+                .expect(&format!("failed to open stdout file @ {}", filepath,));
+            assert_eq!(contents, format!("{}\n", expected_output));
+        }
+
         #[test]
         fn stdout() {
             let client = get_rocket_client();
@@ -366,11 +372,7 @@ mod tests {
             assert_eq!(create_resp.stderr, OutStdio::INHERITED);
             let wait_resp = wait_for_id(&client, create_resp.id);
             assert!(wait_resp.success);
-            let contents = std::fs::read_to_string(&create_resp.stdout).expect(&format!(
-                "failed to open stdout file @ {}",
-                &create_resp.stdout
-            ));
-            assert_eq!(contents, format!("{}\n", expected_output));
+            check_contents(create_resp.stdout, expected_output);
         }
 
         #[test]
@@ -388,11 +390,7 @@ mod tests {
             assert!(create_resp.stderr != "");
             let wait_resp = wait_for_id(&client, create_resp.id);
             assert!(wait_resp.success);
-            let contents = std::fs::read_to_string(&create_resp.stderr).expect(&format!(
-                "failed to open stderr file @ {}",
-                &create_resp.stderr
-            ));
-            assert_eq!(contents, format!("{}\n", expected_output));
+            check_contents(create_resp.stderr, expected_output);
         }
 
         #[test]
@@ -410,16 +408,9 @@ mod tests {
             assert!(create_resp.stderr != "");
             let wait_resp = wait_for_id(&client, create_resp.id);
             assert!(wait_resp.success);
-            let contents = std::fs::read_to_string(&create_resp.stdout).expect(&format!(
-                "failed to open stdout file @ {}",
-                &create_resp.stdout
-            ));
-            assert_eq!(contents, format!("{}\n", expected_output));
-            let contents = std::fs::read_to_string(&create_resp.stderr).expect(&format!(
-                "failed to open stderr file @ {}",
-                &create_resp.stderr
-            ));
-            assert_eq!(contents, format!("{}\n", expected_output));
+
+            check_contents(create_resp.stdout, expected_output);
+            check_contents(create_resp.stderr, expected_output);
         }
     }
 
