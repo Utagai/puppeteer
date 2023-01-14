@@ -21,6 +21,10 @@ impl Puppet {
         self.proc.wait()
     }
 
+    pub fn kill(&mut self) -> std::io::Result<()> {
+        self.proc.kill()
+    }
+
     pub fn pid(&self) -> u32 {
         self.proc.id()
     }

@@ -1,7 +1,7 @@
 use rocket::tokio::sync::Mutex;
 
 use crate::puppet::PuppetManager;
-use crate::routes::{cmd, wait};
+use crate::routes::{cmd, kill, wait};
 
 #[macro_use]
 extern crate rocket;
@@ -18,6 +18,7 @@ fn rocket() -> _ {
         ))
         .mount("/", routes![cmd])
         .mount("/", routes![wait])
+        .mount("/", routes![kill])
 }
 
 #[cfg(test)]
@@ -29,7 +30,7 @@ mod tests {
 
     use super::rocket;
     use core::time;
-    use rocket::local::blocking::Client;
+    use rocket::{http::Status, local::blocking::Client};
     use std::path::{Path, PathBuf};
     use uuid::Uuid;
 
@@ -96,6 +97,13 @@ mod tests {
             .dispatch()
             .into_json::<WaitResp>()
             .expect("expected a non-None response for waiting on command")
+    }
+
+    fn kill_id(client: &Client, id: i32) {
+        assert_eq!(
+            client.post(format!("/kill/{}", id)).dispatch().status(),
+            Status::Ok
+        )
     }
 
     fn get_contents(filepath: &str) -> String {
@@ -190,6 +198,8 @@ mod tests {
         }
 
         // If we get here, we found a differing number -- we've passed.
+        // Let's clean-up by killing that script we ran, since it'll otherwise run for a really long time:
+        kill_id(&client, create_resp.id);
     }
 
     mod captures {

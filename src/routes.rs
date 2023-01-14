@@ -1,3 +1,7 @@
+use std::process::id;
+
+use rocket::http::Status;
+use rocket::response::status;
 use rocket::serde::json::Json;
 use rocket::serde::{Deserialize, Serialize};
 use rocket::tokio::sync::Mutex;
@@ -120,6 +124,18 @@ pub async fn wait(id: i32, pups: &'_ State<Mutex<PuppetManager>>) -> Result<Json
             err: None,
         }))
     } else {
+        Err(Error::PuppetNotFound(id))
+    }
+}
+
+#[post("/kill/<id>")]
+pub async fn kill(id: i32, pups: &'_ State<Mutex<PuppetManager>>) -> Result<Status, Error> {
+    let mut pups = pups.lock().await;
+    if let Some(pup) = pups.get(id) {
+        pup.kill()?;
+        Ok(Status::Ok)
+    } else {
+        // TODO: Can we use ? and avoid if let else stuff?
         Err(Error::PuppetNotFound(id))
     }
 }
