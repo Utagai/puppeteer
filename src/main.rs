@@ -24,12 +24,39 @@ struct CaptureOptions {
     stderr: bool,
 }
 
-impl Default for CaptureOptions {
-    fn default() -> CaptureOptions {
+impl CaptureOptions {
+    fn all() -> CaptureOptions {
+        CaptureOptions {
+            stdout: true,
+            stderr: true,
+        }
+    }
+
+    fn stdout() -> CaptureOptions {
+        CaptureOptions {
+            stdout: true,
+            stderr: false,
+        }
+    }
+
+    fn stderr() -> CaptureOptions {
+        CaptureOptions {
+            stdout: false,
+            stderr: true,
+        }
+    }
+
+    fn none() -> CaptureOptions {
         CaptureOptions {
             stdout: false,
             stderr: false,
         }
+    }
+}
+
+impl Default for CaptureOptions {
+    fn default() -> CaptureOptions {
+        CaptureOptions::none()
     }
 }
 
@@ -267,10 +294,11 @@ fn rocket() -> _ {
 
 #[cfg(test)]
 mod tests {
-    use crate::{CreateReq, CreateResp, WaitResp};
+    use crate::{CaptureOptions, CreateReq, CreateResp, OutStdio, WaitResp};
 
     use super::rocket;
-    use rocket::local::blocking::Client;
+    use rocket::local::{blocking::Client, blocking::LocalRequest};
+    use serde::{Deserialize, Serialize};
 
     fn get_rocket_client() -> Client {
         Client::tracked(rocket()).unwrap()
@@ -290,6 +318,8 @@ mod tests {
             .into_json::<CreateResp>()
             .expect("expected non-None response for creating command");
         assert_eq!(create_resp.id, 0);
+        assert_eq!(create_resp.stdout, OutStdio::INHERITED);
+        assert_eq!(create_resp.stderr, OutStdio::INHERITED);
         let wait_resp = client
             .post(format!("/wait/{}", create_resp.id))
             .dispatch()
@@ -297,4 +327,42 @@ mod tests {
             .expect("expected a non-None response for waiting on command");
         assert!(wait_resp.success);
     }
+
+    #[test]
+    fn captures_stdout() {
+        let client = get_rocket_client();
+        let create_resp = client
+            .put("/cmd")
+            .json(&CreateReq {
+                exec: "echo",
+                args: vec!["bar"],
+                capture: Some(CaptureOptions::all()),
+            })
+            .dispatch()
+            .into_json::<CreateResp>()
+            .expect("expected non-None response for creating command");
+        assert!(create_resp.stdout != "");
+        assert!(create_resp.stderr != "");
+        let wait_resp = client
+            .post(format!("/wait/{}", create_resp.id))
+            .dispatch()
+            .into_json::<WaitResp>()
+            .expect("expected a non-None response for waiting on command");
+        assert!(wait_resp.success);
+        let contents = std::fs::read_to_string(&create_resp.stdout).expect(&format!(
+            "failed to open stdout file @ {}",
+            &create_resp.stdout
+        ));
+        println!("{}", create_resp.stdout);
+        assert_eq!(contents, "bar\n")
+    }
+
+    // TODO: This has to be done once we've tested and confirmed that
+    // stdout capture works.
+    // #[test]
+    // fn cmd_inherits_environment() {
+    // 		let expected_key = format!("{}-puppet-test", Uuid::new_v4());
+    // 		std::env::set_var(expected_key, "blah");
+    //
+    // }
 }
