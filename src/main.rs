@@ -9,6 +9,7 @@ use rocket::State;
 use thiserror::Error;
 
 use std::collections::HashMap;
+use std::process::ExitStatus;
 use std::process::{Child, Command, Stdio};
 
 #[macro_use]
@@ -112,9 +113,68 @@ async fn cmd(
     }
 }
 
+#[derive(Serialize, Deserialize)]
+struct WaitResp {
+    id: i32,
+    exit_code: i32,
+    signal_code: i32,
+    signaled: bool,
+    success: bool,
+    err: Option<String>,
+}
+
+#[post("/wait/<id>")]
+async fn wait(id: i32, pups: &'_ State<Mutex<PuppetMap>>) -> status::Custom<Json<WaitResp>> {
+    let mut pups = pups.lock().await;
+    if let Some(pup) = pups.get(id) {
+        match pup.wait() {
+            Ok(exit_status) => status::Custom(
+                Status::Ok,
+                Json(WaitResp {
+                    id: pup.id,
+                    exit_code: exit_status.code().unwrap(),
+                    signal_code: NO_ID,
+                    signaled: false,
+                    success: exit_status.success(),
+                    err: None,
+                }),
+            ),
+            Err(err) => status::Custom(
+                Status::BadRequest,
+                Json(WaitResp {
+                    id: NO_ID,
+                    exit_code: NO_ID,
+                    signal_code: NO_ID,
+                    signaled: false,
+                    success: false,
+                    err: Some(format!("{:?}", err)),
+                }),
+            ),
+        }
+    } else {
+        status::Custom(
+            Status::NotFound,
+            Json(WaitResp {
+                id: NO_ID,
+                exit_code: NO_ID,
+                signal_code: NO_ID,
+                signaled: false,
+                success: false,
+                err: Some(String::from("id not found")),
+            }),
+        )
+    }
+}
+
 struct Puppet {
     id: i32,
     proc: Child,
+}
+
+impl Puppet {
+    fn wait(&mut self) -> std::io::Result<ExitStatus> {
+        self.proc.wait()
+    }
 }
 
 struct PuppetMap {
@@ -142,6 +202,10 @@ impl PuppetMap {
         self.cur_id += 1;
         return next_id;
     }
+
+    fn get(&mut self, id: i32) -> Option<&mut Puppet> {
+        self.pups.get_mut(&id)
+    }
 }
 
 #[launch]
@@ -149,6 +213,7 @@ fn rocket() -> _ {
     rocket::build()
         .manage(Mutex::new(PuppetMap::new()))
         .mount("/", routes![cmd])
+        .mount("/", routes![wait])
 }
 
 #[cfg(test)]
@@ -163,12 +228,14 @@ mod tests {
     }
 
     mod subtests {
+        use crate::WaitResp;
+
         use super::*;
 
         #[test]
         fn test_run_cmd_successfully() {
             let client = get_rocket_client();
-            let resp = client
+            let create_resp = client
                 .put("/cmd")
                 .json(&CreatePuppetReq {
                     exec: "echo",
@@ -178,8 +245,14 @@ mod tests {
                 .dispatch()
                 .into_json::<CreatePuppetResp>()
                 .expect("expected non-None response for creating command");
-            assert_eq!(resp.err, None);
-            assert_eq!(resp.id, 0);
+            assert_eq!(create_resp.err, None);
+            assert_eq!(create_resp.id, 0);
+            let wait_resp = client
+                .post(format!("/wait/{}", create_resp.id))
+                .dispatch()
+                .into_json::<WaitResp>()
+                .expect("expected a non-None response for waiting on command");
+            assert!(wait_resp.success);
         }
     }
 }
