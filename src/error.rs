@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("puppet with id {0} not found")]
+    #[error("puppet with id '{0}' not found")]
     PuppetNotFound(i32),
     #[error("io error")]
     IOError(#[from] std::io::Error),
@@ -24,7 +24,7 @@ struct ErrorJSONResp {
 impl<'r> Responder<'r, 'r> for Error {
     fn respond_to(self, request: &'r rocket::Request<'_>) -> rocket::response::Result<'r> {
         let err_resp = ErrorJSONResp {
-            err: format!("{:?}", self),
+            err: format!("{}", self),
         };
         match json::to_string(&err_resp) {
             Ok(err_json) => Response::build()

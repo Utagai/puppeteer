@@ -318,7 +318,10 @@ mod tests {
             let fake_id = 243423423;
             let resp = client.post(format!("/wait/{}", fake_id)).dispatch();
             let err_json = resp.into_json::<ErrorJSONResp>().unwrap();
-            assert_eq!(err_json.err, format!("PuppetNotFound({})", fake_id));
+            assert_eq!(
+                err_json.err,
+                format!("puppet with id '{}' not found", fake_id)
+            );
         }
     }
 }
