@@ -304,6 +304,24 @@ mod tests {
         Client::tracked(rocket()).unwrap()
     }
 
+    fn create_req(
+        client: &Client,
+        exec: &'static str,
+        args: Vec<&'static str>,
+        capture: CaptureOptions,
+    ) -> CreateResp {
+        client
+            .put("/cmd")
+            .json(&CreateReq {
+                exec,
+                args,
+                capture: Some(capture),
+            })
+            .dispatch()
+            .into_json::<CreateResp>()
+            .expect("expected non-None response for creating command")
+    }
+
     fn wait_for_id(client: &Client, id: i32) -> WaitResp {
         client
             .post(format!("/wait/{}", id))
@@ -315,16 +333,7 @@ mod tests {
     #[test]
     fn run_cmd_successfully() {
         let client = get_rocket_client();
-        let create_resp = client
-            .put("/cmd")
-            .json(&CreateReq {
-                exec: "echo",
-                args: vec!["foo"],
-                capture: None,
-            })
-            .dispatch()
-            .into_json::<CreateResp>()
-            .expect("expected non-None response for creating command");
+        let create_resp = create_req(&client, "echo", vec!["bar"], CaptureOptions::none());
         assert_eq!(create_resp.id, 0);
         assert_eq!(create_resp.stdout, OutStdio::INHERITED);
         assert_eq!(create_resp.stderr, OutStdio::INHERITED);
@@ -335,16 +344,7 @@ mod tests {
     #[test]
     fn captures_stdout() {
         let client = get_rocket_client();
-        let create_resp = client
-            .put("/cmd")
-            .json(&CreateReq {
-                exec: "echo",
-                args: vec!["bar"],
-                capture: Some(CaptureOptions::all()),
-            })
-            .dispatch()
-            .into_json::<CreateResp>()
-            .expect("expected non-None response for creating command");
+        let create_resp = create_req(&client, "echo", vec!["bar"], CaptureOptions::all());
         assert!(create_resp.stdout != "");
         assert!(create_resp.stderr != "");
         let wait_resp = wait_for_id(&client, create_resp.id);
