@@ -1,15 +1,17 @@
+use rocket::futures::stream::Iter;
 use rocket::http::ContentType;
 use rocket::response;
+use rocket::response::stream::ByteStream;
 use rocket::response::{Responder, Response};
 use rocket::serde::json::{self, Json};
 use rocket::serde::{Deserialize, Serialize};
 use rocket::tokio::sync::Mutex;
 use rocket::State;
-use std::io::Cursor;
+use std::io::{Bytes, Cursor, Read};
 
 use std::collections::HashMap;
-use std::process::ExitStatus;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStderr, Command, Stdio};
+use std::process::{ChildStdout, ExitStatus};
 
 #[macro_use]
 extern crate rocket;
@@ -136,6 +138,7 @@ async fn wait(id: i32, pups: &'_ State<Mutex<PuppetMap>>) -> Result<Json<WaitRes
         Ok(Json(WaitResp {
             id: pup.id,
             exit_code: exit_status.code().unwrap(),
+            // TODO: Handle signals.
             signal_code: NO_ID,
             signaled: false,
             success: exit_status.success(),
@@ -146,14 +149,42 @@ async fn wait(id: i32, pups: &'_ State<Mutex<PuppetMap>>) -> Result<Json<WaitRes
     }
 }
 
+// #[post("/stdout/<id>")]
+// async fn stdout(id: i32, pups: &'_ State<Mutex<PuppetMap>>) -> Result<Json<StdoutResp>, Error> {}
+
 struct Puppet {
     id: i32,
     proc: Child,
+    out: Output,
+}
+
+struct Output {
+    stdout: Option<ByteStream<Iter<Bytes<ChildStdout>>>>,
+    stderr: Option<ByteStream<Iter<Bytes<ChildStderr>>>>,
 }
 
 impl Puppet {
     fn wait(&mut self) -> std::io::Result<ExitStatus> {
-        self.proc.wait()
+        let status = self.proc.wait()?;
+        self.out.stdout = self
+            .proc
+            .stdout
+            .take()
+            .map(|v| ByteStream(rocket::futures::stream::iter(v.bytes())));
+        self.out.stderr = self
+            .proc
+            .stderr
+            .take()
+            .map(|v| ByteStream(rocket::futures::stream::iter(v.bytes())));
+        Ok(status)
+    }
+
+    fn take_stdout(&mut self) -> Option<ByteStream<Iter<Bytes<ChildStdout>>>> {
+        self.out.stdout.take()
+    }
+
+    fn take_stderr(&mut self) -> Option<ByteStream<Iter<Bytes<ChildStderr>>>> {
+        self.out.stderr.take()
     }
 }
 
@@ -177,6 +208,10 @@ impl PuppetMap {
             Puppet {
                 id: next_id,
                 proc: cmd,
+                out: Output {
+                    stdout: None,
+                    stderr: None,
+                },
             },
         );
         self.cur_id += 1;
