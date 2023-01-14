@@ -1,17 +1,18 @@
-use rocket::futures::stream::Iter;
 use rocket::http::ContentType;
 use rocket::response;
-use rocket::response::stream::ByteStream;
 use rocket::response::{Responder, Response};
 use rocket::serde::json::{self, Json};
 use rocket::serde::{Deserialize, Serialize};
 use rocket::tokio::sync::Mutex;
 use rocket::State;
-use std::io::{Bytes, Cursor, Read};
+use tempfile::{tempdir, TempDir};
 
 use std::collections::HashMap;
-use std::process::{Child, ChildStderr, Command, Stdio};
-use std::process::{ChildStdout, ExitStatus};
+use std::fs::{create_dir_all, File};
+use std::io::Cursor;
+use std::path::PathBuf;
+use std::process::ExitStatus;
+use std::process::{Child, Command, Stdio};
 
 #[macro_use]
 extern crate rocket;
@@ -21,23 +22,6 @@ extern crate rocket;
 struct CaptureOptions {
     stdout: bool,
     stderr: bool,
-}
-
-impl CaptureOptions {
-    fn stdio(&self) -> (Stdio, Stdio) {
-        (
-            CaptureOptions::flag_to_stdio(self.stdout),
-            CaptureOptions::flag_to_stdio(self.stderr),
-        )
-    }
-
-    fn flag_to_stdio(flag: bool) -> Stdio {
-        if flag {
-            Stdio::piped()
-        } else {
-            Stdio::inherit()
-        }
-    }
 }
 
 impl Default for CaptureOptions {
@@ -74,7 +58,7 @@ impl CreateResp {
 pub enum Error {
     #[error("filler error")]
     Foo(String),
-    #[error("filler error")]
+    #[error("puppet with id {0} not found")]
     PuppetNotFound(i32),
     #[error("io error")]
     IOError(#[from] std::io::Error),
@@ -107,16 +91,14 @@ const NO_ID: i32 = -1;
 #[put("/cmd", format = "json", data = "<pup_req>")]
 async fn cmd(
     pup_req: Json<CreateReq<'_>>,
-    pups: &'_ State<Mutex<PuppetMap>>,
+    pups: &'_ State<Mutex<PuppetManager>>,
 ) -> Result<Json<CreateResp>, Error> {
-    let (stdout_cfg, stderr_cfg) = pup_req.capture.unwrap_or(CaptureOptions::default()).stdio();
-    let proc = Command::new(pup_req.exec)
-        .args(&pup_req.args)
-        .stdout(stdout_cfg)
-        .stderr(stderr_cfg)
-        .spawn()?;
     let mut pups = pups.lock().await;
-    let cmd_id = pups.push(proc);
+    let cmd_id = pups.push(
+        pup_req.exec,
+        &pup_req.args,
+        pup_req.capture.unwrap_or(CaptureOptions::default()),
+    )?;
     Ok(Json(CreateResp::id(cmd_id)))
 }
 
@@ -127,11 +109,13 @@ struct WaitResp {
     signal_code: i32,
     signaled: bool,
     success: bool,
+    stdout_file: String,
+    stderr_file: String,
     err: Option<String>,
 }
 
 #[post("/wait/<id>")]
-async fn wait(id: i32, pups: &'_ State<Mutex<PuppetMap>>) -> Result<Json<WaitResp>, Error> {
+async fn wait(id: i32, pups: &'_ State<Mutex<PuppetManager>>) -> Result<Json<WaitResp>, Error> {
     let mut pups = pups.lock().await;
     if let Some(pup) = pups.get(id) {
         let exit_status = pup.wait()?;
@@ -142,6 +126,8 @@ async fn wait(id: i32, pups: &'_ State<Mutex<PuppetMap>>) -> Result<Json<WaitRes
             signal_code: NO_ID,
             signaled: false,
             success: exit_status.success(),
+            stdout_file: pup.stdout_filepath.clone(),
+            stderr_file: pup.stderr_filepath.clone(),
             err: None,
         }))
     } else {
@@ -149,84 +135,132 @@ async fn wait(id: i32, pups: &'_ State<Mutex<PuppetMap>>) -> Result<Json<WaitRes
     }
 }
 
-// #[post("/stdout/<id>")]
-// async fn stdout(id: i32, pups: &'_ State<Mutex<PuppetMap>>) -> Result<Json<StdoutResp>, Error> {}
-
 struct Puppet {
     id: i32,
     proc: Child,
-    out: Output,
-}
-
-struct Output {
-    stdout: Option<ByteStream<Iter<Bytes<ChildStdout>>>>,
-    stderr: Option<ByteStream<Iter<Bytes<ChildStderr>>>>,
+    stdout_filepath: String,
+    stderr_filepath: String,
 }
 
 impl Puppet {
     fn wait(&mut self) -> std::io::Result<ExitStatus> {
-        let status = self.proc.wait()?;
-        self.out.stdout = self
-            .proc
-            .stdout
-            .take()
-            .map(|v| ByteStream(rocket::futures::stream::iter(v.bytes())));
-        self.out.stderr = self
-            .proc
-            .stderr
-            .take()
-            .map(|v| ByteStream(rocket::futures::stream::iter(v.bytes())));
-        Ok(status)
-    }
-
-    fn take_stdout(&mut self) -> Option<ByteStream<Iter<Bytes<ChildStdout>>>> {
-        self.out.stdout.take()
-    }
-
-    fn take_stderr(&mut self) -> Option<ByteStream<Iter<Bytes<ChildStderr>>>> {
-        self.out.stderr.take()
+        self.proc.wait()
     }
 }
 
-struct PuppetMap {
-    cur_id: i32,
-    pups: HashMap<i32, Puppet>,
+// TODO: We need to work on the names we use for these kinda things, e.g. make_stdio(), Outstdio, etc.
+struct OutStdio {
+    stdio: Stdio,
+    label: String,
 }
 
-impl PuppetMap {
-    fn new() -> Self {
-        PuppetMap {
-            cur_id: 0,
-            pups: HashMap::new(),
+impl OutStdio {
+    const INHERITED: &str = "inherited";
+
+    fn inherit() -> OutStdio {
+        OutStdio {
+            stdio: Stdio::inherit(),
+            label: String::from(OutStdio::INHERITED),
         }
     }
+}
 
-    fn push(&mut self, cmd: Child) -> i32 {
+impl Into<Stdio> for OutStdio {
+    fn into(self) -> Stdio {
+        return self.stdio;
+    }
+}
+
+struct PuppetManager {
+    cur_id: i32,
+    pups: HashMap<i32, Puppet>,
+    out_dir: TempDir,
+}
+
+impl PuppetManager {
+    fn new() -> Result<Self, Error> {
+        Ok(PuppetManager {
+            cur_id: 0,
+            pups: HashMap::new(),
+            out_dir: tempdir()?,
+        })
+    }
+
+    fn push(
+        &mut self,
+        exec: &str,
+        args: &Vec<&str>,
+        capture_opts: CaptureOptions,
+    ) -> Result<i32, Error> {
         let next_id = self.cur_id;
+        let (stdout, stderr) = self.make_stdio(next_id, capture_opts)?;
+        // TODO: Exercise - Can we avoid the copy here?
+        let (stdout_label, stderr_label) = (stdout.label.clone(), stderr.label.clone());
+        let proc = Command::new(exec)
+            .args(args)
+            .stdout(stdout)
+            .stderr(stderr)
+            .spawn()?;
         self.pups.insert(
             next_id,
             Puppet {
                 id: next_id,
-                proc: cmd,
-                out: Output {
-                    stdout: None,
-                    stderr: None,
-                },
+                proc,
+                stdout_filepath: stdout_label,
+                stderr_filepath: stderr_label,
             },
         );
         self.cur_id += 1;
-        return next_id;
+        return Ok(next_id);
     }
 
+    // TODO: Should have a non-mut option.
     fn get(&mut self, id: i32) -> Option<&mut Puppet> {
         self.pups.get_mut(&id)
+    }
+
+    fn make_stdio(
+        &self,
+        id: i32,
+        capture_opts: CaptureOptions,
+    ) -> Result<(OutStdio, OutStdio), Error> {
+        let dirpath = self.out_dir.path();
+        let id_dir = dirpath.join(id.to_string());
+        create_dir_all(&id_dir)?;
+        let stdout_file = if capture_opts.stdout {
+            let stdout_filepath = id_dir.join("stdout");
+            OutStdio {
+                stdio: Stdio::from(File::create(&stdout_filepath)?),
+                label: PathBuf::from(&stdout_filepath) // TODO: Maybe can avoid the copy.
+                    .to_str()
+                    .expect("failed to convert Path -> &str")
+                    .to_string(),
+            }
+        } else {
+            OutStdio::inherit()
+        };
+        let stderr_file = if capture_opts.stderr {
+            let stderr_filepath = id_dir.join("stderr");
+            OutStdio {
+                stdio: Stdio::from(File::create(&stderr_filepath)?),
+                label: stderr_filepath
+                    .to_str()
+                    .expect("failed to convert Path -> &str")
+                    .to_string(),
+            }
+        } else {
+            OutStdio::inherit()
+        };
+        Ok((stdout_file, stderr_file))
     }
 }
 
 #[launch]
 fn rocket() -> _ {
     rocket::build()
-        .manage(Mutex::new(PuppetMap::new()))
+        .manage(Mutex::new(
+            PuppetManager::new().expect("failed to start up puppet manager"),
+        ))
         .mount("/", routes![cmd])
         .mount("/", routes![wait])
 }
