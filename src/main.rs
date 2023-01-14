@@ -25,6 +25,7 @@ struct CaptureOptions {
 }
 
 impl CaptureOptions {
+    #[allow(dead_code)]
     fn all() -> CaptureOptions {
         CaptureOptions {
             stdout: true,
@@ -32,6 +33,7 @@ impl CaptureOptions {
         }
     }
 
+    #[allow(dead_code)]
     fn stdout() -> CaptureOptions {
         CaptureOptions {
             stdout: true,
@@ -39,6 +41,7 @@ impl CaptureOptions {
         }
     }
 
+    #[allow(dead_code)]
     fn stderr() -> CaptureOptions {
         CaptureOptions {
             stdout: false,
@@ -297,8 +300,7 @@ mod tests {
     use crate::{CaptureOptions, CreateReq, CreateResp, OutStdio, WaitResp};
 
     use super::rocket;
-    use rocket::local::{blocking::Client, blocking::LocalRequest};
-    use serde::{Deserialize, Serialize};
+    use rocket::local::blocking::Client;
     use uuid::Uuid;
 
     fn get_rocket_client() -> Client {
