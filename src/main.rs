@@ -322,12 +322,52 @@ mod tests {
             .expect("expected non-None response for creating command")
     }
 
+    struct StdOutput {
+        stdout: String,
+        stderr: String,
+    }
+
+    fn run_cmd_and_get_output(
+        client: &Client,
+        exec: &str,
+        args: Vec<&str>,
+        capture_opts: CaptureOptions,
+    ) -> StdOutput {
+        let create_resp = create_req(client, exec, args, capture_opts);
+        let wait_resp = wait_for_id(&client, create_resp.id);
+        assert!(wait_resp.success);
+        let mut output = StdOutput {
+            stdout: String::from(""),
+            stderr: String::from(""),
+        };
+        if capture_opts.stdout {
+            assert!(create_resp.stdout != "");
+            output.stdout = get_contents(create_resp.stdout);
+        } else {
+            assert_eq!(create_resp.stdout, OutStdio::INHERITED);
+        }
+
+        if capture_opts.stderr {
+            assert!(create_resp.stderr != "");
+            output.stderr = get_contents(create_resp.stderr);
+        } else {
+            assert_eq!(create_resp.stderr, OutStdio::INHERITED);
+        }
+
+        output
+    }
+
     fn wait_for_id(client: &Client, id: i32) -> WaitResp {
         client
             .post(format!("/wait/{}", id))
             .dispatch()
             .into_json::<WaitResp>()
             .expect("expected a non-None response for waiting on command")
+    }
+
+    fn get_contents(filepath: String) -> String {
+        std::fs::read_to_string(&filepath)
+            .expect(&format!("failed to open stdout file @ {}", filepath,))
     }
 
     #[test]
@@ -352,27 +392,20 @@ mod tests {
             return current_dir.join("testscripts").join(name);
         }
 
-        fn check_contents(filepath: String, expected_output: &'static str) {
-            let contents = std::fs::read_to_string(&filepath)
-                .expect(&format!("failed to open stdout file @ {}", filepath,));
-            assert_eq!(contents, format!("{}\n", expected_output));
-        }
-
         #[test]
         fn stdout() {
             let client = get_rocket_client();
             let expected_output = "bar";
-            let create_resp = create_req(
-                &client,
-                "echo",
-                vec![expected_output],
-                CaptureOptions::stdout(),
+            assert_eq!(
+                run_cmd_and_get_output(
+                    &client,
+                    "echo",
+                    vec![expected_output],
+                    CaptureOptions::stdout()
+                )
+                .stdout,
+                format!("{}\n", expected_output)
             );
-            assert!(create_resp.stdout != "");
-            assert_eq!(create_resp.stderr, OutStdio::INHERITED);
-            let wait_resp = wait_for_id(&client, create_resp.id);
-            assert!(wait_resp.success);
-            check_contents(create_resp.stdout, expected_output);
         }
 
         #[test]
@@ -380,37 +413,36 @@ mod tests {
             let client = get_rocket_client();
             let expected_output = "bar";
             let stderr_print = get_testscript_path("stderr.sh");
-            let create_resp = create_req(
-                &client,
-                stderr_print.to_str().unwrap(),
-                vec![expected_output],
-                CaptureOptions::stderr(),
+            assert_eq!(
+                run_cmd_and_get_output(
+                    &client,
+                    stderr_print
+                        .to_str()
+                        .expect("failed to unwrap stderr script filepath"),
+                    vec![expected_output],
+                    CaptureOptions::stderr()
+                )
+                .stderr,
+                format!("{}\n", expected_output)
             );
-            assert_eq!(create_resp.stdout, OutStdio::INHERITED);
-            assert!(create_resp.stderr != "");
-            let wait_resp = wait_for_id(&client, create_resp.id);
-            assert!(wait_resp.success);
-            check_contents(create_resp.stderr, expected_output);
         }
 
         #[test]
         fn both() {
             let client = get_rocket_client();
+            // TODO: we should maybe emit two different values for stdout v stderr -- this tests we aren't mixing the two up.
             let expected_output = "bar";
-            let stderr_print = get_testscript_path("both_std.sh");
-            let create_resp = create_req(
+            let both_std_print = get_testscript_path("both_std.sh");
+            let output = run_cmd_and_get_output(
                 &client,
-                stderr_print.to_str().unwrap(),
+                both_std_print
+                    .to_str()
+                    .expect("failed to unwrap stderr script filepath"),
                 vec![expected_output],
                 CaptureOptions::all(),
             );
-            assert!(create_resp.stdout != "");
-            assert!(create_resp.stderr != "");
-            let wait_resp = wait_for_id(&client, create_resp.id);
-            assert!(wait_resp.success);
-
-            check_contents(create_resp.stdout, expected_output);
-            check_contents(create_resp.stderr, expected_output);
+            assert_eq!(output.stdout, format!("{}\n", expected_output));
+            assert_eq!(output.stderr, format!("{}\n", expected_output));
         }
     }
 
