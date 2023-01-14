@@ -1,12 +1,9 @@
 use rocket::http::Status;
 use rocket::response::status;
-use rocket::response::Responder;
 use rocket::serde::json::Json;
 use rocket::serde::{Deserialize, Serialize};
 use rocket::tokio::sync::Mutex;
 use rocket::State;
-
-use thiserror::Error;
 
 use std::collections::HashMap;
 use std::process::ExitStatus;
@@ -50,7 +47,7 @@ impl Default for CaptureOptions {
 
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "rocket::serde")]
-struct CreatePuppetReq<'r> {
+struct CreateReq<'r> {
     exec: &'r str,
     args: Vec<&'r str>,
     capture: Option<CaptureOptions>,
@@ -59,41 +56,31 @@ struct CreatePuppetReq<'r> {
 // TODO: Can we remove the serde()?
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "rocket::serde")]
-struct CreatePuppetResp {
+struct CreateResp {
     id: i32,
     err: Option<String>,
 }
 
-impl CreatePuppetResp {
-    fn id(id: i32) -> CreatePuppetResp {
-        CreatePuppetResp { id, err: None }
+impl CreateResp {
+    fn id(id: i32) -> CreateResp {
+        CreateResp { id, err: None }
     }
 
-    fn err(errmsg: &str) -> CreatePuppetResp {
-        CreatePuppetResp {
+    fn err(errmsg: &str) -> CreateResp {
+        CreateResp {
             id: NO_ID,
             err: Some(errmsg.to_owned()),
         }
     }
 }
 
-#[derive(Error, Debug, Responder)]
-pub enum PuppetError {
-    #[error("filler error")]
-    Foo(String),
-    #[error("io error")]
-    IOError(#[from] std::io::Error),
-    #[error("unknown error")]
-    Unknown { source: std::io::Error },
-}
-
 const NO_ID: i32 = -1;
 
 #[put("/cmd", format = "json", data = "<pup_req>")]
 async fn cmd(
-    pup_req: Json<CreatePuppetReq<'_>>,
+    pup_req: Json<CreateReq<'_>>,
     pups: &'_ State<Mutex<PuppetMap>>,
-) -> status::Custom<Json<CreatePuppetResp>> {
+) -> status::Custom<Json<CreateResp>> {
     let (stdout_cfg, stderr_cfg) = pup_req.capture.unwrap_or(CaptureOptions::default()).stdio();
     let proc_res = Command::new(pup_req.exec)
         .args(&pup_req.args)
@@ -104,11 +91,11 @@ async fn cmd(
         Ok(proc) => {
             let mut pups = pups.lock().await;
             let cmd_id = pups.push(proc);
-            status::Custom(Status::Accepted, Json(CreatePuppetResp::id(cmd_id)))
+            status::Custom(Status::Accepted, Json(CreateResp::id(cmd_id)))
         }
         Err(err) => status::Custom(
             Status::BadRequest,
-            Json(CreatePuppetResp::err(&format!("{:?}", err))),
+            Json(CreateResp::err(&format!("{:?}", err))),
         ),
     }
 }
@@ -218,7 +205,7 @@ fn rocket() -> _ {
 
 #[cfg(test)]
 mod tests {
-    use crate::{CreatePuppetReq, CreatePuppetResp};
+    use crate::{CreateReq, CreateResp};
 
     use super::rocket;
     use rocket::local::blocking::Client;
@@ -237,13 +224,13 @@ mod tests {
             let client = get_rocket_client();
             let create_resp = client
                 .put("/cmd")
-                .json(&CreatePuppetReq {
+                .json(&CreateReq {
                     exec: "echo",
                     args: vec!["foo"],
                     capture: None,
                 })
                 .dispatch()
-                .into_json::<CreatePuppetResp>()
+                .into_json::<CreateResp>()
                 .expect("expected non-None response for creating command");
             assert_eq!(create_resp.err, None);
             assert_eq!(create_resp.id, 0);
