@@ -128,22 +128,15 @@ impl WaitResp {
 #[post("/wait/<id>")]
 pub async fn wait(id: i32, pups: &'_ State<Mutex<PuppetManager>>) -> Result<Json<WaitResp>, Error> {
     let mut pups = pups.lock().await;
-    if let Some(pup) = pups.get(id) {
-        let exit_status = pup.wait()?;
-        Ok(Json(WaitResp::from(pup.id, exit_status)))
-    } else {
-        Err(Error::PuppetNotFound(id))
-    }
+    let pup = pups.get(id).ok_or(Error::PuppetNotFound(id))?;
+    let exit_status = pup.wait()?;
+    Ok(Json(WaitResp::from(pup.id, exit_status)))
 }
 
 #[post("/kill/<id>")]
 pub async fn kill(id: i32, pups: &'_ State<Mutex<PuppetManager>>) -> Result<Status, Error> {
     let mut pups = pups.lock().await;
-    if let Some(pup) = pups.get(id) {
-        pup.kill()?;
-        Ok(Status::Ok)
-    } else {
-        // TODO: Can we use ? and avoid if let else stuff?
-        Err(Error::PuppetNotFound(id))
-    }
+    let pup = pups.get(id).ok_or(Error::PuppetNotFound(id))?;
+    pup.kill()?;
+    Ok(Status::Ok)
 }
