@@ -290,7 +290,9 @@ mod tests {
     use crate::{CaptureOptions, CreateReq, CreateResp, Stdio, WaitResp};
 
     use super::rocket;
+    use core::time;
     use rocket::local::blocking::Client;
+    use std::path::{Path, PathBuf};
     use uuid::Uuid;
 
     fn get_rocket_client() -> Client {
@@ -335,14 +337,14 @@ mod tests {
         };
         if capture_opts.stdout {
             assert!(create_resp.stdout != "");
-            output.stdout = get_contents(create_resp.stdout);
+            output.stdout = get_contents(&create_resp.stdout);
         } else {
             assert_eq!(create_resp.stdout, Stdio::INHERITED);
         }
 
         if capture_opts.stderr {
             assert!(create_resp.stderr != "");
-            output.stderr = get_contents(create_resp.stderr);
+            output.stderr = get_contents(&create_resp.stderr);
         } else {
             assert_eq!(create_resp.stderr, Stdio::INHERITED);
         }
@@ -358,9 +360,14 @@ mod tests {
             .expect("expected a non-None response for waiting on command")
     }
 
-    fn get_contents(filepath: String) -> String {
+    fn get_contents(filepath: &str) -> String {
         std::fs::read_to_string(&filepath)
-            .expect(&format!("failed to open stdout file @ {}", filepath,))
+            .expect(&format!("failed to open stdout file @ {}", filepath))
+    }
+
+    fn get_testscript_path<P: AsRef<Path>>(name: P) -> PathBuf {
+        let current_dir = std::env::current_dir().expect("failed to get current working directory");
+        return current_dir.join("testscripts").join(name);
     }
 
     #[test]
@@ -382,23 +389,71 @@ mod tests {
         std::env::set_var(&expected_env_var_key, expected_env_var_val);
         let output =
             run_cmd_and_get_output(&client, "env", vec![], CaptureOptions::stdout()).stdout;
-        println!("output from env: {}", output);
         output.contains(&format!(
             "{}={}",
             expected_env_var_key, expected_env_var_val
         ));
     }
 
-    mod captures {
-        use std::path::{Path, PathBuf};
+    #[test]
+    fn can_stream_cmd_output_without_wait() {
+        let client = get_rocket_client();
 
-        use super::*;
+        let periodic_print = get_testscript_path("periodic.sh");
+        let create_resp = create_req(
+            &client,
+            periodic_print
+                .to_str()
+                .expect("failed to unwrap periodic script filepath"),
+            vec!["bar"],
+            CaptureOptions::stdout(),
+        );
+        assert_eq!(create_resp.id, 0);
+        assert!(create_resp.stdout != "");
+        assert_eq!(create_resp.stderr, Stdio::INHERITED);
 
-        fn get_testscript_path<P: AsRef<Path>>(name: P) -> PathBuf {
-            let current_dir =
-                std::env::current_dir().expect("failed to get current working directory");
-            return current_dir.join("testscripts").join(name);
+        let get_last_num = || loop {
+            let contents = get_contents(&create_resp.stdout);
+            if contents.len() > 0 {
+                let last_line = contents
+                    .split("\n")
+                    .last()
+                    .expect("expected a non-zero length periodic output to have a last line");
+                if let Ok(last_num) = last_line.parse::<i32>() {
+                    break last_num;
+                } else {
+                    // It is possible that we end up picking up the
+                    // very first line of the file, which would be an
+                    // empty line with only a newline. It is fairly
+                    // rare, but possible as long as the threads align
+                    // properly.
+                    continue;
+                }
+            }
+        };
+
+        // The logic is as follows, given that the script is just outputting a monotonically increasing integer every second:
+        //	1. Keep the loop going until it finds any amount of output.
+        //	2. Once output is found, find the last line of that output, and save it.
+        //  3. Run a loop again, repeatedly finding the last line.
+        //  4. Keep doing this until you find a last-line that shows a number greater than the one saved in step 2.
+        // This proves that we are finding data that is being continuously streamed.
+        let last_num = get_last_num();
+
+        const DELAY: time::Duration = time::Duration::from_millis(100);
+        const MAX_ATTEMPTS: i32 = 100; // delay * max_attempts = 10 seconds. Should be more than enough.
+        let mut attempts = 0;
+        while get_last_num() == last_num {
+            std::thread::sleep(DELAY);
+            attempts += 1;
+            assert!(attempts < MAX_ATTEMPTS);
         }
+
+        // If we get here, we found a differing number -- we've passed.
+    }
+
+    mod captures {
+        use super::*;
 
         #[test]
         fn stdout() {
