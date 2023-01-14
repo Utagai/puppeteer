@@ -306,8 +306,8 @@ mod tests {
 
     fn create_req(
         client: &Client,
-        exec: &'static str,
-        args: Vec<&'static str>,
+        exec: &str,
+        args: Vec<&str>,
         capture: CaptureOptions,
     ) -> CreateResp {
         client
@@ -341,19 +341,59 @@ mod tests {
         assert!(wait_resp.success);
     }
 
-    #[test]
-    fn captures_stdout() {
-        let client = get_rocket_client();
-        let create_resp = create_req(&client, "echo", vec!["bar"], CaptureOptions::all());
-        assert!(create_resp.stdout != "");
-        assert!(create_resp.stderr != "");
-        let wait_resp = wait_for_id(&client, create_resp.id);
-        assert!(wait_resp.success);
-        let contents = std::fs::read_to_string(&create_resp.stdout).expect(&format!(
-            "failed to open stdout file @ {}",
-            &create_resp.stdout
-        ));
-        assert_eq!(contents, "bar\n");
+    mod captures {
+        use std::path::{Path, PathBuf};
+
+        use super::*;
+
+        fn get_testscript_path<P: AsRef<Path>>(name: P) -> PathBuf {
+            let current_dir =
+                std::env::current_dir().expect("failed to get current working directory");
+            return current_dir.join("testscripts").join(name);
+        }
+
+        #[test]
+        fn stdout() {
+            let client = get_rocket_client();
+            let expected_output = "bar";
+            let create_resp = create_req(
+                &client,
+                "echo",
+                vec![expected_output],
+                CaptureOptions::stdout(),
+            );
+            assert!(create_resp.stdout != "");
+            assert_eq!(create_resp.stderr, OutStdio::INHERITED);
+            let wait_resp = wait_for_id(&client, create_resp.id);
+            assert!(wait_resp.success);
+            let contents = std::fs::read_to_string(&create_resp.stdout).expect(&format!(
+                "failed to open stdout file @ {}",
+                &create_resp.stdout
+            ));
+            assert_eq!(contents, format!("{}\n", expected_output));
+        }
+
+        #[test]
+        fn stderr() {
+            let client = get_rocket_client();
+            let expected_output = "bar";
+            let stderr_print = get_testscript_path("stderr.sh");
+            let create_resp = create_req(
+                &client,
+                stderr_print.to_str().unwrap(),
+                vec![expected_output],
+                CaptureOptions::stderr(),
+            );
+            assert_eq!(create_resp.stdout, OutStdio::INHERITED);
+            assert!(create_resp.stderr != "");
+            let wait_resp = wait_for_id(&client, create_resp.id);
+            assert!(wait_resp.success);
+            let contents = std::fs::read_to_string(&create_resp.stderr).expect(&format!(
+                "failed to open stderr file @ {}",
+                &create_resp.stderr
+            ));
+            assert_eq!(contents, format!("{}\n", expected_output));
+        }
     }
 
     // TODO: This has to be done once we've tested and confirmed that
