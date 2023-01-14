@@ -12,7 +12,7 @@ use std::fs::{create_dir_all, File};
 use std::io::Cursor;
 use std::path::PathBuf;
 use std::process::ExitStatus;
-use std::process::{Child, Command, Stdio};
+use std::process::{self, Child, Command};
 
 #[macro_use]
 extern crate rocket;
@@ -176,25 +176,24 @@ impl Puppet {
     }
 }
 
-// TODO: We need to work on the names we use for these kinda things, e.g. make_stdio(), Outstdio, etc.
-struct OutStdio {
-    stdio: Stdio,
+struct Stdio {
+    stdio: process::Stdio,
     label: String,
 }
 
-impl OutStdio {
+impl Stdio {
     const INHERITED: &str = "inherited";
 
-    fn inherit() -> OutStdio {
-        OutStdio {
-            stdio: Stdio::inherit(),
-            label: String::from(OutStdio::INHERITED),
+    fn inherit() -> Stdio {
+        Stdio {
+            stdio: process::Stdio::inherit(),
+            label: String::from(Stdio::INHERITED),
         }
     }
 }
 
-impl Into<Stdio> for OutStdio {
-    fn into(self) -> Stdio {
+impl Into<process::Stdio> for Stdio {
+    fn into(self) -> process::Stdio {
         return self.stdio;
     }
 }
@@ -240,42 +239,37 @@ impl PuppetManager {
         return Ok(self.pups.get(&next_id).unwrap());
     }
 
-    // TODO: Should have a non-mut option.
     fn get(&mut self, id: i32) -> Option<&mut Puppet> {
         self.pups.get_mut(&id)
     }
 
-    fn make_stdio(
-        &self,
-        id: i32,
-        capture_opts: CaptureOptions,
-    ) -> Result<(OutStdio, OutStdio), Error> {
+    fn make_stdio(&self, id: i32, capture_opts: CaptureOptions) -> Result<(Stdio, Stdio), Error> {
         let dirpath = self.out_dir.path();
         let id_dir = dirpath.join(id.to_string());
         create_dir_all(&id_dir)?;
         let stdout_file = if capture_opts.stdout {
             let stdout_filepath = id_dir.join("stdout");
-            OutStdio {
-                stdio: Stdio::from(File::create(&stdout_filepath)?),
+            Stdio {
+                stdio: process::Stdio::from(File::create(&stdout_filepath)?),
                 label: PathBuf::from(&stdout_filepath) // TODO: Maybe can avoid the copy.
                     .to_str()
                     .expect("failed to convert Path -> &str")
                     .to_string(),
             }
         } else {
-            OutStdio::inherit()
+            Stdio::inherit()
         };
         let stderr_file = if capture_opts.stderr {
             let stderr_filepath = id_dir.join("stderr");
-            OutStdio {
-                stdio: Stdio::from(File::create(&stderr_filepath)?),
+            Stdio {
+                stdio: process::Stdio::from(File::create(&stderr_filepath)?),
                 label: stderr_filepath
                     .to_str()
                     .expect("failed to convert Path -> &str")
                     .to_string(),
             }
         } else {
-            OutStdio::inherit()
+            Stdio::inherit()
         };
         Ok((stdout_file, stderr_file))
     }
@@ -293,7 +287,7 @@ fn rocket() -> _ {
 
 #[cfg(test)]
 mod tests {
-    use crate::{CaptureOptions, CreateReq, CreateResp, OutStdio, WaitResp};
+    use crate::{CaptureOptions, CreateReq, CreateResp, Stdio, WaitResp};
 
     use super::rocket;
     use rocket::local::blocking::Client;
@@ -343,14 +337,14 @@ mod tests {
             assert!(create_resp.stdout != "");
             output.stdout = get_contents(create_resp.stdout);
         } else {
-            assert_eq!(create_resp.stdout, OutStdio::INHERITED);
+            assert_eq!(create_resp.stdout, Stdio::INHERITED);
         }
 
         if capture_opts.stderr {
             assert!(create_resp.stderr != "");
             output.stderr = get_contents(create_resp.stderr);
         } else {
-            assert_eq!(create_resp.stderr, OutStdio::INHERITED);
+            assert_eq!(create_resp.stderr, Stdio::INHERITED);
         }
 
         output
@@ -374,8 +368,8 @@ mod tests {
         let client = get_rocket_client();
         let create_resp = create_req(&client, "echo", vec!["bar"], CaptureOptions::none());
         assert_eq!(create_resp.id, 0);
-        assert_eq!(create_resp.stdout, OutStdio::INHERITED);
-        assert_eq!(create_resp.stderr, OutStdio::INHERITED);
+        assert_eq!(create_resp.stdout, Stdio::INHERITED);
+        assert_eq!(create_resp.stderr, Stdio::INHERITED);
         let wait_resp = wait_for_id(&client, create_resp.id);
         assert!(wait_resp.success);
     }
@@ -459,13 +453,4 @@ mod tests {
             assert_eq!(output.stderr, format!("{}\n", expected_output));
         }
     }
-
-    // TODO: This has to be done once we've tested and confirmed that
-    // stdout capture works.
-    // #[test]
-    // fn cmd_inherits_environment() {
-    // 		let expected_key = format!("{}-puppet-test", Uuid::new_v4());
-    // 		std::env::set_var(expected_key, "blah");
-    //
-    // }
 }
