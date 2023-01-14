@@ -61,6 +61,7 @@ pub struct CreateReq<'r> {
 #[derive(Serialize, Deserialize)]
 pub struct CreateResp {
     pub id: i32,
+    pub pid: u32,
     pub stdout: String,
     pub stderr: String,
 }
@@ -69,6 +70,7 @@ impl From<&Puppet> for CreateResp {
     fn from(pup: &Puppet) -> Self {
         CreateResp {
             id: pup.id,
+            pid: pup.pid(),
             // TODO: Exercise - Can we avoid clone()?
             stdout: pup.stdout.clone(),
             stderr: pup.stderr.clone(),

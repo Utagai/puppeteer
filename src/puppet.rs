@@ -20,6 +20,10 @@ impl Puppet {
     pub fn wait(&mut self) -> std::io::Result<ExitStatus> {
         self.proc.wait()
     }
+
+    pub fn pid(&self) -> u32 {
+        self.proc.id()
+    }
 }
 
 pub struct Stdio {

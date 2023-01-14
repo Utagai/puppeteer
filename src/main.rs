@@ -115,7 +115,9 @@ mod tests {
         assert_eq!(create_resp.id, 0);
         assert_eq!(create_resp.stdout, Stdio::INHERITED);
         assert_eq!(create_resp.stderr, Stdio::INHERITED);
+        assert_ne!(create_resp.pid, 0);
         let wait_resp = wait_for_id(&client, create_resp.id);
+        // TODO: There are more fields here that we haven't tested.
         assert!(wait_resp.success);
     }
 
