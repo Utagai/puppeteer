@@ -9,3 +9,5 @@
 =puppeteer= was made a sort of proof-of-concept to see if there was a way I could integrate it with my =emacs= set-up to be able to 'remotely' execute commands in my terminal emulator, and/or run commands with the context of my active shell sessions and effectively 'pipe' them back to =emacs=.
 
 While I think this is still possible, what I've realized in the process of writing =puppeteer= as it is now is that it isn't all that useful. As a result, I'm not intending on doing any more work for this project, and it is archived.
+
+At least I got to learn more =rust=.
