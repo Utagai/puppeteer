@@ -366,7 +366,7 @@ mod tests {
     #[test]
     fn run_cmd_successfully() {
         let client = get_rocket_client();
-        let create_resp = create_req(&client, "echo", vec!["bar"], CaptureOptions::none());
+        let create_resp = create_req(&client, "echo", vec!["-n", ""], CaptureOptions::none());
         assert_eq!(create_resp.id, 0);
         assert_eq!(create_resp.stdout, Stdio::INHERITED);
         assert_eq!(create_resp.stderr, Stdio::INHERITED);
