@@ -129,6 +129,41 @@ mod tests {
         assert!(wait_resp.success);
     }
 
+    // TODO: Need to test error cases:
+    // * Puppet that DNE.
+    // * double-wait
+    // * double-kill
+    // * wait after kill
+    // * exec that DNE
+    // * exec that isn't an exec?
+
+    fn find_proc(pid: u32) -> Option<psutil::process::Process> {
+        psutil::process::processes()
+            .expect("failed to get a listing of system processes")
+            .into_iter()
+            .find(|proc_res| proc_res.as_ref().map_or(false, |proc| proc.pid() == pid)) // Option<Result<ProcessResult<Process>>>
+            .map(|proc_res| proc_res.map_or(None, |proc| Some(proc))) // Option<Option<Process>>
+            .map(|proc| proc.expect("wtf")) // Option<Process>
+    }
+
+    #[test]
+    fn kill_cmd() {
+        let client = get_rocket_client();
+        let forever = get_testscript_path("forever.sh");
+        let create_resp = create_req(
+            &client,
+            forever
+                .to_str()
+                .expect("failed to unwrap forever script filepath"),
+            vec![],
+            CaptureOptions::none(),
+        );
+        assert_ne!(find_proc(create_resp.pid), None);
+        kill_id(&client, create_resp.id);
+        println!("ok killed {}", create_resp.pid);
+        while find_proc(create_resp.pid) != None {}
+    }
+
     #[test]
     fn cmd_inherits_from_server_env() {
         let client = get_rocket_client();

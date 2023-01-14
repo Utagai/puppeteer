@@ -22,7 +22,9 @@ impl Puppet {
     }
 
     pub fn kill(&mut self) -> std::io::Result<()> {
-        self.proc.kill()
+        self.proc.kill()?;
+        self.proc.wait()?;
+        Ok(())
     }
 
     pub fn pid(&self) -> u32 {
