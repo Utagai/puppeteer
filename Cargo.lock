@@ -889,7 +889,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "puppet"
+name = "puppeteer"
 version = "0.1.0"
 dependencies = [
  "psutil",
