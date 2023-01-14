@@ -46,11 +46,17 @@ struct CreateReq<'r> {
 #[serde(crate = "rocket::serde")]
 struct CreateResp {
     id: i32,
+    stdout: String,
+    stderr: String,
 }
 
-impl CreateResp {
-    fn id(id: i32) -> CreateResp {
-        CreateResp { id }
+impl From<&Puppet> for CreateResp {
+    fn from(value: &Puppet) -> Self {
+        CreateResp {
+            id: value.id,
+            stdout: value.stdout_filepath.clone(),
+            stderr: value.stderr_filepath.clone(),
+        }
     }
 }
 
@@ -94,12 +100,12 @@ async fn cmd(
     pups: &'_ State<Mutex<PuppetManager>>,
 ) -> Result<Json<CreateResp>, Error> {
     let mut pups = pups.lock().await;
-    let cmd_id = pups.push(
+    let pup = pups.push(
         pup_req.exec,
         &pup_req.args,
         pup_req.capture.unwrap_or(CaptureOptions::default()),
     )?;
-    Ok(Json(CreateResp::id(cmd_id)))
+    Ok(Json(CreateResp::from(pup)))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -109,8 +115,6 @@ struct WaitResp {
     signal_code: i32,
     signaled: bool,
     success: bool,
-    stdout_file: String,
-    stderr_file: String,
     err: Option<String>,
 }
 
@@ -126,8 +130,6 @@ async fn wait(id: i32, pups: &'_ State<Mutex<PuppetManager>>) -> Result<Json<Wai
             signal_code: NO_ID,
             signaled: false,
             success: exit_status.success(),
-            stdout_file: pup.stdout_filepath.clone(),
-            stderr_file: pup.stderr_filepath.clone(),
             err: None,
         }))
     } else {
@@ -191,7 +193,7 @@ impl PuppetManager {
         exec: &str,
         args: &Vec<&str>,
         capture_opts: CaptureOptions,
-    ) -> Result<i32, Error> {
+    ) -> Result<&Puppet, Error> {
         let next_id = self.cur_id;
         let (stdout, stderr) = self.make_stdio(next_id, capture_opts)?;
         // TODO: Exercise - Can we avoid the copy here?
@@ -201,17 +203,15 @@ impl PuppetManager {
             .stdout(stdout)
             .stderr(stderr)
             .spawn()?;
-        self.pups.insert(
-            next_id,
-            Puppet {
-                id: next_id,
-                proc,
-                stdout_filepath: stdout_label,
-                stderr_filepath: stderr_label,
-            },
-        );
+        let pup = Puppet {
+            id: next_id,
+            proc,
+            stdout_filepath: stdout_label,
+            stderr_filepath: stderr_label,
+        };
+        self.pups.insert(next_id, pup);
         self.cur_id += 1;
-        return Ok(next_id);
+        return Ok(self.pups.get(&next_id).unwrap());
     }
 
     // TODO: Should have a non-mut option.
