@@ -1,0 +1,11 @@
+* =puppeteer=
+=puppeteer= is a HTTP server that exposes a REST API with the following three endpoints:
+
+- =/cmd= For creating a command with a given executable and arguments, as well as indicators to whether =stdout= and =stderr= should be captured or if =puppeteer= should emit them itself. =puppeteer='s response will include an ID that uniquely identifies the process it created.
+- =/wait/<id>= For waiting on a process with the given =<id>=. Returns some information one would expect to find in the equivalent syscall.
+- =/kill/<id>= Kills the process with the given =<id>=.
+
+** Motivation
+=puppeteer= was made a sort of proof-of-concept to see if there was a way I could integrate it with my =emacs= set-up to be able to 'remotely' execute commands in my terminal emulator, and/or run commands with the context of my active shell sessions and effectively 'pipe' them back to =emacs=.
+
+While I think this is still possible, what I've realized in the process of writing =puppeteer= as it is now is that it isn't all that useful. As a result, I'm not intending on doing any more work for this project, and it is archived.
