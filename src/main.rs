@@ -304,6 +304,14 @@ mod tests {
         Client::tracked(rocket()).unwrap()
     }
 
+    fn wait_for_id(client: &Client, id: i32) -> WaitResp {
+        client
+            .post(format!("/wait/{}", id))
+            .dispatch()
+            .into_json::<WaitResp>()
+            .expect("expected a non-None response for waiting on command")
+    }
+
     #[test]
     fn run_cmd_successfully() {
         let client = get_rocket_client();
@@ -320,11 +328,7 @@ mod tests {
         assert_eq!(create_resp.id, 0);
         assert_eq!(create_resp.stdout, OutStdio::INHERITED);
         assert_eq!(create_resp.stderr, OutStdio::INHERITED);
-        let wait_resp = client
-            .post(format!("/wait/{}", create_resp.id))
-            .dispatch()
-            .into_json::<WaitResp>()
-            .expect("expected a non-None response for waiting on command");
+        let wait_resp = wait_for_id(&client, create_resp.id);
         assert!(wait_resp.success);
     }
 
@@ -343,18 +347,13 @@ mod tests {
             .expect("expected non-None response for creating command");
         assert!(create_resp.stdout != "");
         assert!(create_resp.stderr != "");
-        let wait_resp = client
-            .post(format!("/wait/{}", create_resp.id))
-            .dispatch()
-            .into_json::<WaitResp>()
-            .expect("expected a non-None response for waiting on command");
+        let wait_resp = wait_for_id(&client, create_resp.id);
         assert!(wait_resp.success);
         let contents = std::fs::read_to_string(&create_resp.stdout).expect(&format!(
             "failed to open stdout file @ {}",
             &create_resp.stdout
         ));
-        println!("{}", create_resp.stdout);
-        assert_eq!(contents, "bar\n")
+        assert_eq!(contents, "bar\n");
     }
 
     // TODO: This has to be done once we've tested and confirmed that
