@@ -198,7 +198,7 @@ fn rocket() -> _ {
 
 #[cfg(test)]
 mod tests {
-    use crate::{CreateReq, CreateResp};
+    use crate::{CreateReq, CreateResp, WaitResp};
 
     use super::rocket;
     use rocket::local::blocking::Client;
@@ -207,31 +207,25 @@ mod tests {
         Client::tracked(rocket()).unwrap()
     }
 
-    mod subtests {
-        use crate::WaitResp;
-
-        use super::*;
-
-        #[test]
-        fn test_run_cmd_successfully() {
-            let client = get_rocket_client();
-            let create_resp = client
-                .put("/cmd")
-                .json(&CreateReq {
-                    exec: "echo",
-                    args: vec!["foo"],
-                    capture: None,
-                })
-                .dispatch()
-                .into_json::<CreateResp>()
-                .expect("expected non-None response for creating command");
-            assert_eq!(create_resp.id, 0);
-            let wait_resp = client
-                .post(format!("/wait/{}", create_resp.id))
-                .dispatch()
-                .into_json::<WaitResp>()
-                .expect("expected a non-None response for waiting on command");
-            assert!(wait_resp.success);
-        }
+    #[test]
+    fn run_cmd_successfully() {
+        let client = get_rocket_client();
+        let create_resp = client
+            .put("/cmd")
+            .json(&CreateReq {
+                exec: "echo",
+                args: vec!["foo"],
+                capture: None,
+            })
+            .dispatch()
+            .into_json::<CreateResp>()
+            .expect("expected non-None response for creating command");
+        assert_eq!(create_resp.id, 0);
+        let wait_resp = client
+            .post(format!("/wait/{}", create_resp.id))
+            .dispatch()
+            .into_json::<WaitResp>()
+            .expect("expected a non-None response for waiting on command");
+        assert!(wait_resp.success);
     }
 }
